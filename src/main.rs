@@ -283,12 +283,12 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 if c.is_numeric() == false {
                     let a_instruction = format!("0{:015b}", literal as u16);
                     assembler_output.push_str(&a_instruction);
-    if c == '\r' || c == '\n'  {
-    state = ParserState::Start;
-    }
-    else {
-    state = ParserState::AssertEndOfInstruction;
-    }
+                    if c == '\r' || c == '\n'  {
+                        state = ParserState::Start;
+                    }
+                    else {
+                        state = ParserState::AssertEndOfInstruction;
+                    }
                 }
                 else {
                     literal *= 10;
