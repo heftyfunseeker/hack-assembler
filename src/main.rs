@@ -283,12 +283,12 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 if c.is_numeric() == false {
                     let a_instruction = format!("0{:015b}", literal as u16);
                     assembler_output.push_str(&a_instruction);
-					if c == '\r' || c == '\n'  {
-						state = ParserState::Start;
-					}
-					else {
-						state = ParserState::AssertEndOfInstruction;
-					}
+    if c == '\r' || c == '\n'  {
+    state = ParserState::Start;
+    }
+    else {
+    state = ParserState::AssertEndOfInstruction;
+    }
                 }
                 else {
                     literal *= 10;
@@ -300,14 +300,13 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     let symbol_patch = patch_info.entry(symbol_hash).or_insert(SymbolPatchInfo { address: -1, patch_indices: Default::default() });
                     // allocate room for this to be patched;
                     symbol_patch.patch_indices.push(assembler_output.len());
-                    assembler_output.push_str("ptchptchptchptch");
-					
-					if c == '\r' || c == '\n'  {
-						state = ParserState::Start;
-					}
-					else {
-						state = ParserState::AssertEndOfInstruction;
-					}
+                    assembler_output.push_str("ptchptchptchptch");    
+                    if c == '\r' || c == '\n'  {
+                        state = ParserState::Start;
+                    }
+                    else {
+                        state = ParserState::AssertEndOfInstruction;
+                    }
                 }
                 else {
                     symbol_hash = adjust_hash(symbol_hash, c);
