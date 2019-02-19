@@ -65,6 +65,7 @@ const BITS_7: &'static [&'static str] = &[
     "0010101", // d|a, d|m
     "1010101", // d|a, d|m
 ];
+
 #[derive(Default)]
 struct SymbolPatchInfo {
     address: i32, // this symbol's adress
@@ -226,10 +227,10 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::CInstructionJmp;
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
-    else if c.is_ascii_whitespace() {
-    assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
-    continue;
-    }
+                else if c.is_ascii_whitespace() {
+                    assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
+                    continue;
+                }
                 else {
                     c_inst_hash = adjust_hash(c_inst_hash, c);
                 }
