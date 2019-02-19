@@ -90,12 +90,12 @@ fn fnv_64(input: &str) -> u64 {
 
 #[inline]
 fn is_eol(c: char) -> bool {
-	return c == '\n' || c == '\r';
+    return c == '\n' || c == '\r';
 }
 
 #[inline]
 fn is_valid_symbol_char(c: char) -> bool {
-	return c == '_' || c == '.' || c == '$' || c == ':';
+    return c == '_' || c == '.' || c == '$' || c == ':';
 }
 
 fn assemble(source: &str, assembler_output: &mut String) {
@@ -226,10 +226,10 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::CInstructionJmp;
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
-				else if c.is_ascii_whitespace() {
-					assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
-					continue;
-				}
+    else if c.is_ascii_whitespace() {
+    assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
+    continue;
+    }
                 else {
                     c_inst_hash = adjust_hash(c_inst_hash, c);
                 }
@@ -372,7 +372,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
         }
     }
 
-	assert!(state == ParserState::Start, "Didn't finish parsing instruction on line {}", line_number);
+    assert!(state == ParserState::Start, "Didn't finish parsing instruction on line {}", line_number);
 
     // patch symbols
     for (_, patch_info) in &patch_info {
