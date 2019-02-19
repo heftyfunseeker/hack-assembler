@@ -2,6 +2,10 @@ use std::env;
 use std::fs;
 use std::collections::HashMap;
 
+// max instructions we can store (32k)
+const INSTRUCTION_MEM_SIZE: i32 = 32767;
+const MAX_ADDRESS: i32 = 0x6000;
+
 #[derive(Debug, PartialEq, Clone)]
 enum ParserState {
     Start,
@@ -20,14 +24,14 @@ enum ParserState {
 
 // used for dest and jmp
 const BITS_3: &'static [&'static str] = &[
-    "000", // null
-    "001", // m
-    "010", // d
-    "011", // md
-    "100", // a
-    "101", // am
-    "110", // ad
-    "111", // amd
+    "000",
+    "001",
+    "010",
+    "011",
+    "100",
+    "101",
+    "110",
+    "111",
 ];
 
 // use for comp
@@ -70,6 +74,7 @@ struct SymbolPatchInfo {
 static FNV_OFFSET:u64 = 14695981039346656037;
 static FNV_PRIME:u64 = 1099511628211;
 
+#[inline]
 fn adjust_hash(hash: u64, c: char) -> u64 {
     return hash.wrapping_mul(FNV_PRIME) ^ c as u64;
 }
@@ -81,6 +86,16 @@ fn fnv_64(input: &str) -> u64 {
         hash = hash ^ c as u64;
     }
     return hash;
+}
+
+#[inline]
+fn is_eol(c: char) -> bool {
+	return c == '\n' || c == '\r';
+}
+
+#[inline]
+fn is_valid_symbol_char(c: char) -> bool {
+	return c == '_' || c == '.' || c == '$' || c == ':';
 }
 
 fn assemble(source: &str, assembler_output: &mut String) {
@@ -192,7 +207,6 @@ fn assemble(source: &str, assembler_output: &mut String) {
                         assembler_output.push('\n');
                     }
                     assembler_output.push_str("111");
-
                     dest_bits = BITS_3[0]; // set to null;
                     // c instr header
                     state = ParserState::CInstructionDestOrCmp;
@@ -212,6 +226,10 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::CInstructionJmp;
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
+				else if c.is_ascii_whitespace() {
+					assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
+					continue;
+				}
                 else {
                     c_inst_hash = adjust_hash(c_inst_hash, c);
                 }
@@ -234,7 +252,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::ReadingComment;
                 }
                 else if c.is_ascii_whitespace() {
-                    if c == '\n' || c == '\r' {
+                    if is_eol(c) {
                         let comp_bits = comp_lut[&c_inst_hash];
                         assembler_output.push_str(comp_bits);
                         assembler_output.push_str(dest_bits);
@@ -257,7 +275,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
                 else if c.is_ascii_whitespace() {
-                    if c == '\n' || c == '\r' {
+                    if is_eol(c) {
                         let jmp_bits = jump_lut[&c_inst_hash];
                         assembler_output.push_str(jmp_bits);
                         c_inst_hash = FNV_OFFSET; // reset for comp
@@ -283,7 +301,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 if c.is_numeric() == false {
                     let a_instruction = format!("0{:015b}", literal as u16);
                     assembler_output.push_str(&a_instruction);
-                    if c == '\r' || c == '\n'  {
+                    if is_eol(c) {
                         state = ParserState::Start;
                     }
                     else {
@@ -296,12 +314,12 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
             }
             ParserState::AInstructionSymbol => {
-                if c.is_ascii_alphanumeric() == false  && c != '_' && c != '.' && c != '$' && c != ':' {
+                if !c.is_ascii_alphanumeric() && !is_valid_symbol_char(c) {
                     let symbol_patch = patch_info.entry(symbol_hash).or_insert(SymbolPatchInfo { address: -1, patch_indices: Default::default() });
-                    // allocate room for this to be patched;
+                    // allocate room for this to be patched
                     symbol_patch.patch_indices.push(assembler_output.len());
-                    assembler_output.push_str("ptchptchptchptch");    
-                    if c == '\r' || c == '\n'  {
+                    assembler_output.push_str("ptchptchptchptch");
+                    if is_eol(c) {
                         state = ParserState::Start;
                     }
                     else {
@@ -313,7 +331,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
             }
             ParserState::LabelStart => {
-                assert!(c.is_ascii_alphabetic() || c == '_' || c == '.' || c == '$' || c == ':');
+                assert!(c.is_ascii_alphabetic() || is_valid_symbol_char(c), "invalid leading character: {} on line {}", c, line_number);
                 symbol_hash = adjust_hash(symbol_hash, c);
                 state = ParserState::LabelEnd;
             }
@@ -327,7 +345,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::AssertEndOfInstruction;
                 }
                 else {
-                    assert!(c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '$' || c == ':');
+                    assert!(c.is_ascii_alphanumeric() || is_valid_symbol_char(c), "{} is not a valid label character on line {}", c, line_number);
                     symbol_hash = adjust_hash(symbol_hash, c);
                 }
             }
@@ -336,7 +354,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                state = ParserState::LookingForNewline;
             }
             ParserState::LookingForNewline => {
-                if c == '\n' || c == '\r' {
+                if is_eol(c) {
                     state = ParserState::Start;
                 }
             }
@@ -344,15 +362,17 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 if c == '/' {
                     state = ParserState::ReadingComment;
                 }
-                else if c == '\n' || c == '\r'  {
+                else if is_eol(c) {
                     state = ParserState::Start;
                 }
                 else {
-                    assert!(c.is_whitespace());
+                    assert!(c.is_whitespace(), "unexpected trailing character: {} on line {}", c, line_number);
                 }
             }
         }
     }
+
+	assert!(state == ParserState::Start, "Didn't finish parsing instruction on line {}", line_number);
 
     // patch symbols
     for (_, patch_info) in &patch_info {
@@ -373,18 +393,16 @@ fn assemble(source: &str, assembler_output: &mut String) {
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    //@nicco: lets check this first
-    let filename = &args[1];
+    let source_file_name = &args[1];
+    let dest_file_name = &args[2];
 
-    let source = fs::read_to_string(filename)
-        .expect("Something went wrong reading file");
-
-    println!("parsing file: {}", filename);
+    let source = fs::read_to_string(source_file_name)
+        .expect("Something went wrong reading source file");
 
     let mut assembler_output: String = String::new();
     assemble(&source, &mut assembler_output);
 
+    let _ = fs::write(dest_file_name, &assembler_output);
 
-    let _ = fs::write("pong.hack", &assembler_output);
-    //print!("\ngenerated assembly: \n{}", assembler_output);
+    println!("generated binary at file: {}", dest_file_name);
 }
