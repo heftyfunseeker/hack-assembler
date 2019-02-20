@@ -4,4 +4,8 @@ version = "0.1.0"
 authors = ["heftyfunseeker <niccosimone@gmail.com>"]
 edition = "2018"
 
+[lib]
+name = "hack_assembler"
+path = "src/lib.rs"
+
 [dependencies]
