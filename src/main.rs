@@ -3,8 +3,11 @@ use std::fs;
 use std::collections::HashMap;
 
 // max instructions we can store (32k)
+// This is also used to validate literals and symbol addresses.
+// We don't know if authors are addressing in ROM or RAM so we just
+// ensure we're in 32k address range. The spec says anything in RAM over 0x6000 is invalid.
+// I think that's something we can assert at runtime though
 const INSTRUCTION_MEM_SIZE: i32 = 32767;
-const MAX_ADDRESS: i32 = 0x6000;
 
 #[derive(Debug, PartialEq, Clone)]
 enum ParserState {
@@ -75,6 +78,9 @@ struct SymbolPatchInfo {
 static FNV_OFFSET:u64 = 14695981039346656037;
 static FNV_PRIME:u64 = 1099511628211;
 
+// we do incremental hashing in order to
+// only look at each character in the source once
+// and allow whitespace during processing.
 #[inline]
 fn adjust_hash(hash: u64, c: char) -> u64 {
     return hash.wrapping_mul(FNV_PRIME) ^ c as u64;
@@ -177,7 +183,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
     let mut state: ParserState = ParserState::Start;
     let mut c_inst_hash: u64 = FNV_OFFSET;
     let mut symbol_hash: u64 = FNV_OFFSET;
-    let mut literal:u64 = 0;
+    let mut literal:i32 = 0;
     let mut dest_bits: &str = BITS_3[0]; // set to null;
     let mut instruction_number: i32 = -1;
     let mut source_line_number: i32 = 1;
@@ -240,25 +246,23 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
             }
             ParserState::CInstructionCmp => {
-                if c == ';' {
+                if c == ';' || c == '/' || is_eol(c){
                     let comp_bits = comp_lut[&c_inst_hash];
                     assembler_output.push_str(comp_bits);
                     assembler_output.push_str(dest_bits);
                     c_inst_hash = FNV_OFFSET; // reset for comp
-                    state = ParserState::CInstructionJmp;
-                }
-                else if c == '/' || is_eol(c){
-                    let comp_bits = comp_lut[&c_inst_hash];
-                    assembler_output.push_str(comp_bits);
-                    assembler_output.push_str(dest_bits);
-                    assembler_output.push_str(BITS_3[0]);
-                    c_inst_hash = FNV_OFFSET; // reset for comp
-                    if is_eol(c) {
-                        state = ParserState::Start;
-                        source_line_number += 1;
+                    if c == ';' {
+                        state = ParserState::CInstructionJmp;
                     }
                     else {
-                        state = ParserState::ReadingComment;
+                        assembler_output.push_str(BITS_3[0]);
+                        if c == '/' {
+                            state = ParserState::ReadingComment;
+                        }
+                        else {
+                            state = ParserState::Start;
+                            source_line_number += 1;
+                        }
                     }
                 }
                 else if !c.is_ascii_whitespace() {
@@ -284,7 +288,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
             }
             ParserState::AInstructionStart => {
                 if c.is_numeric() {
-                    literal = c as u64 - '0' as u64;
+                    literal = c as i32 - '0' as i32;
                     state = ParserState::AInstructionNumeric;
                 }
                 else if c.is_ascii_alphabetic() {
@@ -294,6 +298,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
             }
             ParserState::AInstructionNumeric => {
                 if c.is_numeric() == false {
+                    assert!(literal <= INSTRUCTION_MEM_SIZE, "cannot address {}. Literals not greater than {}", literal, INSTRUCTION_MEM_SIZE);
                     let a_instruction = format!("0{:015b}", literal as u16);
                     assembler_output.push_str(&a_instruction);
                     if is_eol(c) {
@@ -306,7 +311,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
                 else {
                     literal *= 10;
-                    literal += c as u64 - '0' as u64;
+                    literal += c as i32 - '0' as i32;
                 }
             }
             ParserState::AInstructionSymbol => {
@@ -375,12 +380,11 @@ fn assemble(source: &str, assembler_output: &mut String) {
 
     // patch symbols
     for (_, patch_info) in &patch_info {
-        let mut address = next_address;
-        if patch_info.address != -1 {
-            address = patch_info.address;
-        }
-        else {
+        let mut address = patch_info.address;
+        if address == -1 {
+            address = next_address;
             next_address += 1;
+            assert!(next_address < INSTRUCTION_MEM_SIZE, "symbol addresses have been exhausted - gg");
         }
         for &patch_index in &patch_info.patch_indices {
             let a_instruction = format!("0{:015b}", address as u16);
