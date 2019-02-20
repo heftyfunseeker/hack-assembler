@@ -384,7 +384,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
         if address == -1 {
             address = next_address;
             next_address += 1;
-            assert!(next_address < INSTRUCTION_MEM_SIZE, "symbol addresses have been exhausted - gg");
+            assert!(next_address <= INSTRUCTION_MEM_SIZE, "symbol addresses have been exhausted - gg");
         }
         for &patch_index in &patch_info.patch_indices {
             let a_instruction = format!("0{:015b}", address as u16);
