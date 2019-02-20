@@ -179,12 +179,16 @@ fn assemble(source: &str, assembler_output: &mut String) {
     let mut symbol_hash: u64 = FNV_OFFSET;
     let mut literal:u64 = 0;
     let mut dest_bits: &str = BITS_3[0]; // set to null;
-    let mut line_number: i32 = -1;
+    let mut instruction_number: i32 = -1;
+    let mut source_line_number: i32 = 1;
     let mut next_address = 16; // usable address (+1) for the symbol patcher to use
     for c in source.chars() {
         match state {
             ParserState::Start => {
                 if c.is_ascii_whitespace() {
+                    if is_eol(c) {
+                        source_line_number += 1;
+                    }
                     continue;
                 }
                 if c == '/' {
@@ -195,16 +199,16 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     state = ParserState::LabelStart;
                 }
                 else if c == '@' { // a-instruction
-                    line_number += 1;
+                    instruction_number += 1;
                     symbol_hash = FNV_OFFSET;
-                    if line_number != 0 {
+                    if instruction_number != 0 {
                         assembler_output.push('\n');
                     }
                     state = ParserState::AInstructionStart;
                 }
                 else /* c-instrunction */ {
-                    line_number += 1;
-                    if line_number != 0 {
+                    instruction_number += 1;
+                    if instruction_number != 0 {
                         assembler_output.push('\n');
                     }
                     assembler_output.push_str("111");
@@ -228,7 +232,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
                 else if c.is_ascii_whitespace() {
-                    assert!(!is_eol(c), "expected a destination or jump on line {}", line_number);
+                    assert!(!is_eol(c), "unrecognized c instruction line: {}", source_line_number);
                     continue;
                 }
                 else {
@@ -243,48 +247,38 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     c_inst_hash = FNV_OFFSET; // reset for comp
                     state = ParserState::CInstructionJmp;
                 }
-                else if c == '/' {
+                else if c == '/' || is_eol(c){
                     let comp_bits = comp_lut[&c_inst_hash];
                     assembler_output.push_str(comp_bits);
                     assembler_output.push_str(dest_bits);
-                    // null jump
                     assembler_output.push_str(BITS_3[0]);
                     c_inst_hash = FNV_OFFSET; // reset for comp
-                    state = ParserState::ReadingComment;
-                }
-                else if c.is_ascii_whitespace() {
                     if is_eol(c) {
-                        let comp_bits = comp_lut[&c_inst_hash];
-                        assembler_output.push_str(comp_bits);
-                        assembler_output.push_str(dest_bits);
-                        // null jump
-                        assembler_output.push_str(BITS_3[0]);
-                        c_inst_hash = FNV_OFFSET; // reset for comp
                         state = ParserState::Start;
+                        source_line_number += 1;
                     }
-                    continue;
+                    else {
+                        state = ParserState::ReadingComment;
+                    }
                 }
-                else {
+                else if !c.is_ascii_whitespace() {
                     c_inst_hash = adjust_hash(c_inst_hash, c);
                 }
             }
             ParserState::CInstructionJmp => {
-                if c == '/' {
+                if c == '/' || is_eol(c) {
                     let jmp_bits = jump_lut[&c_inst_hash];
                     assembler_output.push_str(jmp_bits);
-                    state = ParserState::ReadingComment;
                     c_inst_hash = FNV_OFFSET; // reset for comp
-                }
-                else if c.is_ascii_whitespace() {
                     if is_eol(c) {
-                        let jmp_bits = jump_lut[&c_inst_hash];
-                        assembler_output.push_str(jmp_bits);
-                        c_inst_hash = FNV_OFFSET; // reset for comp
                         state = ParserState::Start;
+                        source_line_number += 1;
                     }
-                    continue;
+                    else {
+                        state = ParserState::ReadingComment;
+                    }
                 }
-                else {
+                else if !c.is_ascii_whitespace() {
                     c_inst_hash = adjust_hash(c_inst_hash, c);
                 }
             }
@@ -304,6 +298,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     assembler_output.push_str(&a_instruction);
                     if is_eol(c) {
                         state = ParserState::Start;
+                        source_line_number += 1;
                     }
                     else {
                         state = ParserState::AssertEndOfInstruction;
@@ -322,6 +317,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
                     assembler_output.push_str("ptchptchptchptch");
                     if is_eol(c) {
                         state = ParserState::Start;
+                        source_line_number += 1;
                     }
                     else {
                         state = ParserState::AssertEndOfInstruction;
@@ -332,21 +328,21 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
             }
             ParserState::LabelStart => {
-                assert!(c.is_ascii_alphabetic() || is_valid_symbol_char(c), "invalid leading character: {} on line {}", c, line_number);
+                assert!(c.is_ascii_alphabetic() || is_valid_symbol_char(c), "invalid leading character: {} on line {}", c, source_line_number);
                 symbol_hash = adjust_hash(symbol_hash, c);
                 state = ParserState::LabelEnd;
             }
             ParserState::LabelEnd => {
                 if c == ')' {
-                    let symbol_patch = patch_info.entry(symbol_hash).or_insert(SymbolPatchInfo { address: line_number + 1, patch_indices: Default::default() });
+                    let symbol_patch = patch_info.entry(symbol_hash).or_insert(SymbolPatchInfo { address: instruction_number + 1, patch_indices: Default::default() });
                     if symbol_patch.address == -1 {
-                        symbol_patch.address = line_number + 1;
+                        symbol_patch.address = instruction_number + 1;
                     }
                     // allocate room for this to be patched;
                     state = ParserState::AssertEndOfInstruction;
                 }
                 else {
-                    assert!(c.is_ascii_alphanumeric() || is_valid_symbol_char(c), "{} is not a valid label character on line {}", c, line_number);
+                    assert!(c.is_ascii_alphanumeric() || is_valid_symbol_char(c), "{} is not a valid label character on line {}", c, source_line_number);
                     symbol_hash = adjust_hash(symbol_hash, c);
                 }
             }
@@ -357,6 +353,7 @@ fn assemble(source: &str, assembler_output: &mut String) {
             ParserState::LookingForNewline => {
                 if is_eol(c) {
                     state = ParserState::Start;
+                    source_line_number += 1;
                 }
             }
             ParserState::AssertEndOfInstruction => {
@@ -365,15 +362,16 @@ fn assemble(source: &str, assembler_output: &mut String) {
                 }
                 else if is_eol(c) {
                     state = ParserState::Start;
+                    source_line_number += 1;
                 }
                 else {
-                    assert!(c.is_whitespace(), "unexpected trailing character: {} on line {}", c, line_number);
+                    assert!(c.is_whitespace(), "unexpected trailing character: {} on line {}", c, source_line_number);
                 }
             }
         }
     }
 
-    assert!(state == ParserState::Start, "Didn't finish parsing instruction on line {}", line_number);
+    assert!(state == ParserState::Start, "Didn't finish parsing instruction on line {}", source_line_number);
 
     // patch symbols
     for (_, patch_info) in &patch_info {
