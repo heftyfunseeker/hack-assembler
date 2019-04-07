@@ -76,10 +76,10 @@ struct SymbolPatchInfo {
 static FNV_OFFSET:u64 = 14695981039346656037;
 static FNV_PRIME:u64 = 1099511628211;
 
-// we do incremental hashing in order to
+// incremental hashing in order to
 // only look at each character in the source once
 // and allow whitespace during processing.
-// @todo: we need to check for collisions
+// @todo: check for collisions
 #[inline]
 fn adjust_hash(hash: u64, c: char) -> u64 {
     return hash.wrapping_mul(FNV_PRIME) ^ c as u64;
@@ -104,7 +104,7 @@ fn is_valid_symbol_char(c: char) -> bool {
     return c == '_' || c == '.' || c == '$' || c == ':';
 }
 
-pub fn assemble(source: &str, assembler_output: &mut String) {
+pub fn assemble(source: &str, assembler_out: &mut String) {
     let mut comp_lut: HashMap<u64, &str> = HashMap::new();
     comp_lut.insert(fnv_64("0"),   &BITS_7[0]);
     comp_lut.insert(fnv_64("1"),   &BITS_7[1]);
@@ -207,16 +207,16 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
                     instruction_number += 1;
                     symbol_hash = FNV_OFFSET;
                     if instruction_number != 0 {
-                        assembler_output.push('\n');
+                        assembler_out.push('\n');
                     }
                     state = ParserState::AInstructionStart;
                 }
                 else /* c-instrunction */ {
                     instruction_number += 1;
                     if instruction_number != 0 {
-                        assembler_output.push('\n');
+                        assembler_out.push('\n');
                     }
-                    assembler_output.push_str("111");
+                    assembler_out.push_str("111");
                     dest_bits = BITS_3[0]; // set to null;
                     // c instr header
                     state = ParserState::CInstructionDestOrCmp;
@@ -231,8 +231,8 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
                 }
                 else if c == ';' {
                     let comp_bits = comp_lut[&c_inst_hash];
-                    assembler_output.push_str(comp_bits);
-                    assembler_output.push_str(dest_bits);
+                    assembler_out.push_str(comp_bits);
+                    assembler_out.push_str(dest_bits);
                     state = ParserState::CInstructionJmp;
                     c_inst_hash = FNV_OFFSET; // reset for comp
                 }
@@ -247,14 +247,14 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
             ParserState::CInstructionCmp => {
                 if c == ';' || c == '/' || is_eol(c){
                     let comp_bits = comp_lut[&c_inst_hash];
-                    assembler_output.push_str(comp_bits);
-                    assembler_output.push_str(dest_bits);
+                    assembler_out.push_str(comp_bits);
+                    assembler_out.push_str(dest_bits);
                     c_inst_hash = FNV_OFFSET; // reset for comp
                     if c == ';' {
                         state = ParserState::CInstructionJmp;
                     }
                     else {
-                        assembler_output.push_str(BITS_3[0]);
+                        assembler_out.push_str(BITS_3[0]);
                         if c == '/' {
                             state = ParserState::ReadingComment;
                         }
@@ -271,7 +271,7 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
             ParserState::CInstructionJmp => {
                 if c == '/' || is_eol(c) {
                     let jmp_bits = jump_lut[&c_inst_hash];
-                    assembler_output.push_str(jmp_bits);
+                    assembler_out.push_str(jmp_bits);
                     c_inst_hash = FNV_OFFSET; // reset for comp
                     if is_eol(c) {
                         state = ParserState::Start;
@@ -299,7 +299,7 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
                 if c.is_numeric() == false {
                     assert!(literal <= INSTRUCTION_MEM_SIZE, "cannot address {}. Literals not greater than {}", literal, INSTRUCTION_MEM_SIZE);
                     let a_instruction = format!("0{:015b}", literal as u16);
-                    assembler_output.push_str(&a_instruction);
+                    assembler_out.push_str(&a_instruction);
                     if is_eol(c) {
                         state = ParserState::Start;
                         source_line_number += 1;
@@ -317,8 +317,8 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
                 if !c.is_ascii_alphanumeric() && !is_valid_symbol_char(c) {
                     let symbol_patch = patch_info.entry(symbol_hash).or_insert(SymbolPatchInfo { address: -1, patch_indices: Default::default() });
                     // allocate room for this to be patched
-                    symbol_patch.patch_indices.push(assembler_output.len());
-                    assembler_output.push_str("ptchptchptchptch");
+                    symbol_patch.patch_indices.push(assembler_out.len());
+                    assembler_out.push_str("ptchptchptchptch");
                     if is_eol(c) {
                         state = ParserState::Start;
                         source_line_number += 1;
@@ -387,7 +387,33 @@ pub fn assemble(source: &str, assembler_output: &mut String) {
         }
         for &patch_index in &patch_info.patch_indices {
             let a_instruction = format!("0{:015b}", address as u16);
-            assembler_output.replace_range(patch_index..(patch_index+16), &a_instruction);
+            assembler_out.replace_range(patch_index..(patch_index+16), &a_instruction);
         }
+    }
+}
+
+// brings us from 16 bytes per instruction to 2 - nand2tetris expects the string format, hack-emulator
+// will run off raw u16 for processing instructions.
+pub fn generate_binary(assembled: String, assembled_binary_out: &mut Vec<u16>) {
+    const INSTRUCTION_SIZE:usize = 16;
+    let bytes = assembled.into_bytes();
+    let mut i = 0;
+    while (i + INSTRUCTION_SIZE) < bytes.len() {
+        // eat newlines
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+
+        // read our 16 byte instruction into 2 bytes
+        let mut raw_instruction:u16 = 0;
+        let mut pos:u32 = 1;
+        for b in bytes[i..(i + INSTRUCTION_SIZE)].iter().rev() {
+            let c = *b as char;
+            let d: u16 = if c == '1' { 1 } else { 0 } as u16;
+            raw_instruction += pos as u16 * d;
+            pos *= 2;
+        }
+        assembled_binary_out.push(raw_instruction);
+        i += INSTRUCTION_SIZE;
     }
 }

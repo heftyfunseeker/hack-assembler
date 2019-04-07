@@ -2,7 +2,6 @@ extern crate hack_assembler;
 
 use std::env;
 use std::fs;
-use hack_assembler::assemble;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -14,9 +13,12 @@ fn main() {
         .expect("Something went wrong reading source file");
 
     let mut assembler_output: String = String::new();
-    assemble(&source, &mut assembler_output);
+    hack_assembler::assemble(&source, &mut assembler_output);
 
     let _ = fs::write(dest_file_name, &assembler_output);
 
-    println!("generated binary at file: {}", dest_file_name);
+    let mut binary = Vec::new();
+    hack_assembler::generate_binary(assembler_output, &mut binary);
+
+    println!("generated assembly at file: {}", dest_file_name);
 }
